@@ -33,15 +33,15 @@ class OSQP(Function):
         The optimization problem for each instance in the batch
         (dropping indexing from the notation) is of the form
 
-            \hat x =   argmin_x 1/2 x' P x + q' x
+            \\hat x =   argmin_x 1/2 x' P x + q' x
                        subject to l <= Ax <= u
 
-        where P \in S^{n,n},
+        where P \\in S^{n,n},
               S^{n,n} is the set of all positive semi-definite matrices,
-              q \in R^{n}
-              A \in R^{m,n}
-              l \in R^{m}
-              u \in R^{m}
+              q \\in R^{n}
+              A \\in R^{m,n}
+              l \\in R^{m}
+              u \\in R^{m}
 
         These parameters should all be passed to this function as
         Variable- or Parameter-wrapped Tensors.
@@ -98,6 +98,11 @@ class OSQP(Function):
             m = osqp.OSQP()
             m.setup(P[i], q[i], A[i], l[i], u[i], verbose=self.verbose)
             result = m.solve()
+            status = result.info.status
+            if status != 'solved':
+                # TODO: We can replace this with something calmer and
+                # add some more options around potentially ignoring this.
+                raise RuntimeError(f"Unable to solve QP, status: {status}")
             x.append(result.x)
             y.append(result.y)
             z.append(A[i].dot(result.x))
@@ -113,6 +118,7 @@ class OSQP(Function):
         return x_torch
 
     def backward(self, dl_dx_val):
+
         dtype = dl_dx_val.dtype
         device = dl_dx_val.device
 
