@@ -200,7 +200,9 @@ class _OSQP(Function):
                 rhs = np.hstack([dl_dx[i], np.zeros(n_low + n_upp)])
 
                 # Get solution
-                r_sol = sla.spsolve(KKT, rhs)
+                # r_sol = sla.spsolve(KKT, rhs)
+                r_sol = sla.lsqr(KKT, rhs)[0]
+
                 r_x =  r_sol[:ctx.n]
                 r_yl = r_sol[ctx.n:ctx.n + n_low]
                 r_yu = r_sol[ctx.n + n_low:]
@@ -215,14 +217,14 @@ class _OSQP(Function):
                     for j in range(ctx.m)])
                 du[i] = torch.tensor(t)
             elif ctx.diff_mode == DiffModes.FULL:
-                # TODO: Add in kkt_eps as an option?
-                kkt_eps = 1e-6
                 KKT = spa.vstack([spa.hstack([P[i], A[i].T.dot(spa.diags(y[i]))]),
-                                  spa.hstack([A[i], -kkt_eps*spa.eye(ctx.m)])])
+                                  spa.hstack([A[i], spa.csc_matrix((ctx.m, ctx.m))])])
                 rhs = np.hstack([dl_dx[i], np.zeros(ctx.m)])
 
                 # Get solution
-                r_sol = sla.spsolve(KKT, rhs)
+                # r_sol = sla.spsolve(KKT, rhs)
+                r_sol = sla.lsqr(KKT, rhs)[0]
+
                 r_x =  r_sol[:ctx.n]
                 r_y =  r_sol[ctx.n:] * y[i]
 
