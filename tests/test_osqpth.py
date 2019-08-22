@@ -3,7 +3,7 @@
 
 import pytest
 import osqp
-from osqpth.osqpth import OSQP
+from osqpth.osqpth import OSQP, DiffModes
 import numpy.random as npr
 import numpy as np
 import torch
@@ -19,7 +19,8 @@ verbose = True
 
 
 def get_grads(n_batch=1, n=10, m=3, P_scale=1.,
-              A_scale=1., u_scale=1., l_scale=1.):
+              A_scale=1., u_scale=1., l_scale=1.,
+              diff_mode=DiffModes.FULL):
     assert(n_batch == 1)
     npr.seed(1)
     L = np.random.randn(n, n)
@@ -35,11 +36,11 @@ def get_grads(n_batch=1, n=10, m=3, P_scale=1.,
     P, q, A, l, u, true_x = [x.astype(np.float64) for x in
                              [P, q, A, l, u, true_x]]
 
-    grads = get_grads_torch(P, q, A, l, u, true_x)
+    grads = get_grads_torch(P, q, A, l, u, true_x, diff_mode)
     return [P, q,  A, l, u, true_x], grads
 
 
-def get_grads_torch(P, q, A, l, u, true_x):
+def get_grads_torch(P, q, A, l, u, true_x, diff_mode):
 
     P_idx = P.nonzero()
     P_shape = P.shape
@@ -56,7 +57,7 @@ def get_grads_torch(P, q, A, l, u, true_x):
     for x in [P_torch, q_torch, A_torch, l_torch, u_torch]:
         x.requires_grad = True
 
-    x_hats = OSQP(P_idx, P_shape, A_idx, A_shape)(P_torch, q_torch, A_torch, l_torch, u_torch)
+    x_hats = OSQP(P_idx, P_shape, A_idx, A_shape, diff_mode=diff_mode)(P_torch, q_torch, A_torch, l_torch, u_torch)
 
     dl_dxhat = x_hats.data - true_x_torch
     x_hats.backward(dl_dxhat)
@@ -67,19 +68,21 @@ def get_grads_torch(P, q, A, l, u, true_x):
 
 def test_dl_dp():
     n, m = 5, 5
-    [P, q, A, l, u, true_x], [dP, dq, dA, dl, du] = get_grads(
-        n=n, m=m, P_scale=100., A_scale=100.)
+    for diff_mode in DiffModes:
+        [P, q, A, l, u, true_x], [dP, dq, dA, dl, du] = get_grads(
+            n=n, m=m, P_scale=100., A_scale=100., diff_mode=diff_mode)
+        print(f'--- {diff_mode.name}')
 
-    def f(q):
-        m = osqp.OSQP()
-        m.setup(P, q, A, l, u, verbose=verbose)
-        res = m.solve()
-        x_hat = res.x
+        def f(q):
+            m = osqp.OSQP()
+            m.setup(P, q, A, l, u, verbose=False)
+            res = m.solve()
+            x_hat = res.x
 
-        return 0.5 * np.sum(np.square(x_hat - true_x))
+            return 0.5 * np.sum(np.square(x_hat - true_x))
 
-    dq_fd = nd.Gradient(f)(q)
-    if verbose:
-        print('dq_fd: ', np.round(dq_fd, decimals=4))
-        print('dq: ', np.round(dq, decimals=4))
-    npt.assert_allclose(dq_fd, dq, rtol=RTOL, atol=ATOL)
+        dq_fd = nd.Gradient(f)(q)
+        if verbose:
+            print('dq_fd: ', np.round(dq_fd, decimals=4))
+            print('dq: ', np.round(dq, decimals=4))
+        npt.assert_allclose(dq_fd, dq, rtol=RTOL, atol=ATOL)
