@@ -5,12 +5,17 @@ import osqp
 import numpy as np
 import scipy.sparse as spa
 import scipy.sparse.linalg as sla
+
+from enum import IntEnum
+
 from .util import to_numpy
+
+DiffModes = IntEnum('DiffModes', 'ACTIVE FULL')
 
 class OSQP(Module):
     def __init__(self, P_idx, P_shape, A_idx, A_shape,
                  eps_rel=1e-5, eps_abs=1e-5, verbose=False,
-                 max_iter=10000):
+                 max_iter=10000, diff_mode=DiffModes.ACTIVE):
         super().__init__()
         self.eps_abs = eps_abs
         self.eps_rel = eps_rel
@@ -18,6 +23,7 @@ class OSQP(Module):
         self.max_iter = max_iter
         self.P_idx, self.P_shape = P_idx, P_shape
         self.A_idx, self.A_shape = A_idx, A_shape
+        self.diff_mode = diff_mode
 
     def forward(self, P_val, q_val, A_val, l_val, u_val):
         return _OSQP.apply(
@@ -25,7 +31,8 @@ class OSQP(Module):
             self.P_idx, self.P_shape,
             self.A_idx, self.A_shape,
             self.eps_rel, self.eps_abs,
-            self.verbose, self.max_iter
+            self.verbose, self.max_iter,
+            self.diff_mode,
         )
 
 
@@ -33,8 +40,7 @@ class _OSQP(Function):
     @staticmethod
     def forward(ctx, P_val, q_val, A_val, l_val, u_val,
                 A_idx, A_shape, P_idx, P_shape,
-                eps_rel=1e-5, eps_abs=1e-5,
-                verbose=False, max_iter=10000):
+                eps_rel, eps_abs, verbose, max_iter, diff_mode):
         """Solve a batch of QPs using OSQP.
 
         This function solves a batch of QPs, each optimizing over
@@ -80,6 +86,7 @@ class _OSQP(Function):
         ctx.max_iter = max_iter
         ctx.P_idx, ctx.P_shape = P_idx, P_shape
         ctx.A_idx, ctx.A_shape = A_idx, A_shape
+        ctx.diff_mode = diff_mode
 
         params = [P_val, q_val, A_val, l_val, u_val]
 
@@ -175,23 +182,29 @@ class _OSQP(Function):
 
         for i in range(ctx.n_batch):
             # Construct linear system
-            # Taken from https://github.com/oxfordcontrol/osqp-python/blob/0363d028b2321017049360d2eb3c0cf206028c43/modulepurepy/_osqp.py#L1717
-            # Guess which linear constraints are lower-active, upper-active, free
-            ind_low = np.where(z[i] - l[i] < - y[i])[0]
-            ind_upp = np.where(u[i] - z[i] < y[i])[0]
-            n_low = len(ind_low)
-            n_upp = len(ind_upp)
 
-            # Form A_red from the assumed active constraints
-            A_red = spa.vstack([A[i][ind_low], A[i][ind_upp]])
+            if ctx.diff_mode == DiffModes.ACTIVE:
+                # Taken from https://github.com/oxfordcontrol/osqp-python/blob/0363d028b2321017049360d2eb3c0cf206028c43/modulepurepy/_osqp.py#L1717
+                # Guess which linear constraints are lower-active, upper-active, free
+                ind_low = np.where(z[i] - l[i] < - y[i])[0]
+                ind_upp = np.where(u[i] - z[i] < y[i])[0]
+                n_low = len(ind_low)
+                n_upp = len(ind_upp)
 
-            # Form KKT linear system
-            KKT = spa.vstack([spa.hstack([P[i], A_red.T]),
-                              spa.hstack([A_red, spa.csc_matrix((n_low + n_upp, n_low + n_upp))])])
-            rhs = np.hstack([dl_dx[i], np.zeros(n_low + n_upp)])
+                # Form A_red from the assumed active constraints
+                A_red = spa.vstack([A[i][ind_low], A[i][ind_upp]])
 
-            # Get solution
-            r_sol = sla.spsolve(KKT, rhs)
+                # Form KKT linear system
+                KKT = spa.vstack([spa.hstack([P[i], A_red.T]),
+                                spa.hstack([A_red, spa.csc_matrix((n_low + n_upp, n_low + n_upp))])])
+                rhs = np.hstack([dl_dx[i], np.zeros(n_low + n_upp)])
+
+                # Get solution
+                r_sol = sla.spsolve(KKT, rhs)
+            elif ctx.diff_mode == DiffModes.FULL:
+                raise NotImplementedError
+            else:
+                raise RuntimeError(f"Unrecognized differentiation mode")
 
             r_x =  r_sol[:ctx.n]
             r_yl = r_sol[ctx.n:ctx.n + n_low]
@@ -222,6 +235,6 @@ class _OSQP(Function):
             for i, g in enumerate(grads):
                 grads[i] = g.squeeze()
 
-        grads += [None]*8
+        grads += [None]*9
 
         return tuple(grads)
