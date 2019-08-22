@@ -39,7 +39,7 @@ class OSQP(Module):
 class _OSQP(Function):
     @staticmethod
     def forward(ctx, P_val, q_val, A_val, l_val, u_val,
-                A_idx, A_shape, P_idx, P_shape,
+                P_idx, P_shape, A_idx, A_shape,
                 eps_rel, eps_abs, verbose, max_iter, diff_mode):
         """Solve a batch of QPs using OSQP.
 
@@ -201,17 +201,37 @@ class _OSQP(Function):
 
                 # Get solution
                 r_sol = sla.spsolve(KKT, rhs)
+                r_x =  r_sol[:ctx.n]
+                r_yl = r_sol[ctx.n:ctx.n + n_low]
+                r_yu = r_sol[ctx.n + n_low:]
+                r_y = np.zeros(ctx.m)
+                r_y[ind_low] = r_yl
+                r_y[ind_upp] = r_yu
+
+                t = np.hstack([r_yl[np.where(ind_low == j)[0]] if j in ind_low else 0
+                    for j in range(ctx.m)])
+                dl[i] = torch.tensor(t)
+                t = np.hstack([r_yu[np.where(ind_upp == j)[0]] if j in ind_upp else 0
+                    for j in range(ctx.m)])
+                du[i] = torch.tensor(t)
             elif ctx.diff_mode == DiffModes.FULL:
-                raise NotImplementedError
+                # TODO: Add in kkt_eps as an option?
+                kkt_eps = 1e-6
+                KKT = spa.vstack([spa.hstack([P[i], A[i].T.dot(spa.diags(y[i]))]),
+                                  spa.hstack([A[i], -kkt_eps*spa.eye(ctx.m)])])
+                rhs = np.hstack([dl_dx[i], np.zeros(ctx.m)])
+
+                # Get solution
+                r_sol = sla.spsolve(KKT, rhs)
+                r_x =  r_sol[:ctx.n]
+                r_y =  r_sol[ctx.n:] * y[i]
+
+                J = y[i] < 0.
+                dl[i][J] = torch.from_numpy(r_y[J])
+                du[i][~J] = torch.from_numpy(r_y[~J])
             else:
                 raise RuntimeError(f"Unrecognized differentiation mode")
 
-            r_x =  r_sol[:ctx.n]
-            r_yl = r_sol[ctx.n:ctx.n + n_low]
-            r_yu = r_sol[ctx.n + n_low:]
-            r_y = np.zeros(ctx.m)
-            r_y[ind_low] = r_yl
-            r_y[ind_upp] = r_yu
 
              # Extract derivatives
             rows, cols = ctx.P_idx
@@ -222,12 +242,6 @@ class _OSQP(Function):
             values = -(y[i][rows] * r_x[cols] + r_y[rows] * x[i][cols])
             dA[i] = torch.from_numpy(values)
             dq[i] = torch.from_numpy(-r_x)
-            t = np.hstack([r_yl[np.where(ind_low == j)[0]] if j in ind_low else 0
-                 for j in range(ctx.m)])
-            dl[i] = torch.tensor(t)
-            t = np.hstack([r_yu[np.where(ind_upp == j)[0]] if j in ind_upp else 0
-                 for j in range(ctx.m)])
-            du[i] = torch.tensor(t)
 
         grads = [dP, dq, dA, dl, du]
 
