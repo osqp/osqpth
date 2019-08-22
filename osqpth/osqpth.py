@@ -227,8 +227,8 @@ class _OSQP(Function):
                 r_y =  r_sol[ctx.n:] * y[i]
 
                 J = y[i] < 0.
-                dl[i][J] = torch.from_numpy(r_y[J])
-                du[i][~J] = torch.from_numpy(r_y[~J])
+                dl[i][J] = torch.from_numpy(r_y[J]).to(dl.device)
+                du[i][~J] = torch.from_numpy(r_y[~J]).to(du.device)
             else:
                 raise RuntimeError(f"Unrecognized differentiation mode")
 
