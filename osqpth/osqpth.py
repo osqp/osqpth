@@ -217,18 +217,24 @@ class _OSQP(Function):
                     for j in range(ctx.m)])
                 du[i] = torch.tensor(t)
             elif ctx.diff_mode == DiffModes.FULL:
-                KKT = spa.vstack([spa.hstack([P[i], A[i].T.dot(spa.diags(y[i]))]),
-                                  spa.hstack([A[i], spa.csc_matrix((ctx.m, ctx.m))])])
+                KKT_22 = np.zeros(ctx.m)
+                J = y[i] < 0.
+                KKT_22[J] = (A[i].dot(x[i]) - l[i])[J]
+                KKT_22[~J] = (A[i].dot(x[i]) - u[i])[~J]
+
+                # TODO: Better handle when the bounds are \pm\infty.
+                KKT_22[np.isinf(KKT_22)] = 0.
+
+                KKT_T = spa.vstack([spa.hstack([P[i], A[i].T.dot(spa.diags(y[i]))]),
+                                    spa.hstack([A[i], spa.diags(KKT_22)])])
                 rhs = np.hstack([dl_dx[i], np.zeros(ctx.m)])
 
                 # Get solution
-                # r_sol = sla.spsolve(KKT, rhs)
-                r_sol = sla.lsqr(KKT, rhs)[0]
+                r_sol = sla.lsqr(KKT_T, rhs)[0]
 
                 r_x =  r_sol[:ctx.n]
                 r_y =  r_sol[ctx.n:] * y[i]
 
-                J = y[i] < 0.
                 dl[i][J] = torch.from_numpy(r_y[J]).to(dl.device)
                 du[i][~J] = torch.from_numpy(r_y[~J]).to(du.device)
             else:
