@@ -13,7 +13,7 @@ from .util import to_numpy
 class OSQP(Module):
     def __init__(self, P_idx, P_shape, A_idx, A_shape,
                  eps_rel=1e-5, eps_abs=1e-5, verbose=False,
-                 max_iter=10000, diff_mode='active'):
+                 max_iter=10000, diff_mode='qr'):
         super().__init__()
         self.P_idx, self.P_shape = P_idx, P_shape
         self.A_idx, self.A_shape = A_idx, A_shape
@@ -37,7 +37,7 @@ class OSQP(Module):
 
 def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
             verbose, max_iter, diff_mode):
-    DTs = []
+    solvers = []
 
     m, n = A_shape   # Problem size
 
@@ -123,15 +123,16 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
             for i in range(n_batch):
                 # Solve QP
                 # TODO: Cache solver object in between
-                result, DT = osqp.solve_and_derivative(
-                    P[i], q[i], A[i], l[i], u[i], verbose=verbose)
+                solver = osqp.OSQP()
+                solver.setup(P[i], q[i], A[i], l[i], u[i], verbose=verbose)
+                result = solver.solve()
+                solvers.append(solver)
                 status = result.info.status
                 if status != 'solved':
                     # TODO: We can replace this with something calmer and
                     # add some more options around potentially ignoring this.
                     raise RuntimeError(f"Unable to solve QP, status: {status}")
                 x.append(result.x)
-                DTs.append(DT)
 
                 # This is silently converting result.x to the same
                 # dtype and device as x_torch.
@@ -167,10 +168,14 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
             du = torch.zeros((n_batch, m), dtype=dtype, device=device)
 
             for i in range(n_batch):
-                derivatives_numpy = DTs[i](
-                    dx=dl_dx[i], diff_mode=diff_mode, A_idx=A_idx, P_idx=P_idx)
-                derivatives = [torch.from_numpy(d) for d in derivatives_numpy]
-                dP[i], dq[i], dA[i], dl[i], du[i] = derivatives
+                derivatives_np = solvers[i].adjoint_derivative(
+                    dx=dl_dx[i], dy_u=None, dy_l=None,
+                    A_idx=A_idx, P_idx=P_idx,
+                    diff_mode=diff_mode
+                )
+                dPi_np, dqi_np, dAi_np, dli_np, dui_np = derivatives_np
+                dq[i], dl[i], du[i] = [torch.from_numpy(d) for d in [dqi_np, dli_np, dui_np]]
+                dP[i], dA[i] = [torch.from_numpy(d.data) for d in [dPi_np, dAi_np]]
 
             grads = [dP, dq, dA, dl, du]
 

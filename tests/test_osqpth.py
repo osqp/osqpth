@@ -68,7 +68,7 @@ def get_grads_torch(P, q, A, l, u, true_x, diff_mode):
 
 def test_dl_dp():
     n, m = 5, 5
-    for diff_mode in ['active']: #, 'full']:
+    for diff_mode in ['lsqr']: #, 'full']:
         [P, q, A, l, u, true_x], [dP, dq, dA, dl, du] = get_grads(
             n=n, m=m, P_scale=100., A_scale=100., diff_mode=diff_mode)
         print(f'--- {diff_mode}')
