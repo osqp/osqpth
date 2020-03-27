@@ -13,14 +13,13 @@ from .util import to_numpy
 class OSQP(Module):
     def __init__(self, P_idx, P_shape, A_idx, A_shape,
                  eps_rel=1e-5, eps_abs=1e-5, verbose=False,
-                 max_iter=10000, diff_mode='qr'):
+                 max_iter=10000):
         super().__init__()
         self.P_idx, self.P_shape = P_idx, P_shape
         self.A_idx, self.A_shape = A_idx, A_shape
         self.eps_rel, self.eps_abs = eps_rel, eps_abs
         self.verbose = verbose
         self.max_iter = max_iter
-        self.diff_mode = diff_mode
 
     def forward(self, P_val, q_val, A_val, l_val, u_val):
         return _OSQP_Fn(
@@ -32,11 +31,10 @@ class OSQP(Module):
             eps_abs=self.eps_abs,
             verbose=self.verbose,
             max_iter=self.max_iter,
-            diff_mode=self.diff_mode
         )(P_val, q_val, A_val, l_val, u_val)
 
 def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
-            verbose, max_iter, diff_mode):
+            verbose, max_iter):
     solvers = []
 
     m, n = A_shape   # Problem size
@@ -93,13 +91,14 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
                 n_batch = 1
             else:
                 batch_sizes = [t.size(0) if t.ndimension() == 2 else 1 for t in params]
-                ctx.n_batch = max(batch_sizes)
+                n_batch = max(batch_sizes)
 
             dtype = P_val.dtype
             device = P_val.device
 
             # TODO (Bart): create CSC matrix during initialization. Then
             # just reassign the mat.data vector with A_val and P_val
+
             for i, p in enumerate(params):
                 if p.ndimension() == 1:
                     params[i] = p.unsqueeze(0).expand(n_batch, p.size(0))
@@ -141,6 +140,7 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
             # Return solutions
             if not batch_mode:
                 x_torch = x_torch.squeeze(0)
+
             return x_torch
 
         @staticmethod
@@ -149,8 +149,10 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
             device = dl_dx_val.device
 
             batch_mode = dl_dx_val.ndimension() == 2
+
             if not batch_mode:
                 dl_dx_val = dl_dx_val.unsqueeze(0)
+
             n_batch = dl_dx_val.size(0)
             dtype = dl_dx_val.dtype
             device = dl_dx_val.device
@@ -171,7 +173,6 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
                 derivatives_np = solvers[i].adjoint_derivative(
                     dx=dl_dx[i], dy_u=None, dy_l=None,
                     A_idx=A_idx, P_idx=P_idx,
-                    diff_mode=diff_mode
                 )
                 dPi_np, dqi_np, dAi_np, dli_np, dui_np = derivatives_np
                 dq[i], dl[i], du[i] = [torch.from_numpy(d) for d in [dqi_np, dli_np, dui_np]]
