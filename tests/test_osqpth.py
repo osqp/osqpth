@@ -7,12 +7,13 @@ from osqpth.osqpth import OSQP
 import numpy.random as npr
 import numpy as np
 import torch
-import numdifftools as nd
+from scipy.optimize import approx_fprime
 import numpy.testing as npt
 import scipy.sparse as spa
 
 ATOL = 1e-2
 RTOL = 1e-4
+grad_precision=1e-05
 
 cuda = False
 verbose = True
@@ -78,7 +79,7 @@ def test_dl_dp():
 
         return 0.5 * np.sum(np.square(x_hat - true_x))
 
-    dq_fd = nd.Gradient(f)(q)
+    dq_fd = approx_fprime(q, f, grad_precision)
     if verbose:
         print('dq_fd: ', np.round(dq_fd, decimals=4))
         print('dq: ', np.round(dq, decimals=4))
