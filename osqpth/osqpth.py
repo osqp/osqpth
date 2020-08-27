@@ -4,11 +4,10 @@ from torch.autograd import Function
 import osqp
 import numpy as np
 import scipy.sparse as spa
-import scipy.sparse.linalg as sla
 
-from enum import IntEnum
 
 from .util import to_numpy
+
 
 class OSQP(Module):
     def __init__(self, P_idx, P_shape, A_idx, A_shape,
@@ -33,8 +32,9 @@ class OSQP(Module):
             max_iter=self.max_iter,
         )(P_val, q_val, A_val, l_val, u_val)
 
+
 def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
-            verbose, max_iter):
+             verbose, max_iter):
     solvers = []
 
     m, n = A_shape   # Problem size
@@ -123,7 +123,8 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
                 # Solve QP
                 # TODO: Cache solver object in between
                 solver = osqp.OSQP()
-                solver.setup(P[i], q[i], A[i], l[i], u[i], verbose=verbose)
+                solver.setup(P[i], q[i], A[i], l[i], u[i], verbose=verbose,
+                             eps_abs=eps_abs, eps_rel=eps_rel)
                 result = solver.solve()
                 solvers.append(solver)
                 status = result.info.status
@@ -185,5 +186,7 @@ def _OSQP_Fn(P_idx, P_shape, A_idx, A_shape, eps_rel, eps_abs,
                     grads[i] = g.squeeze()
 
             return tuple(grads)
+
+
 
     return _OSQP_FnFn.apply
