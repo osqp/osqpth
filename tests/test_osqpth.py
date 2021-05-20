@@ -52,7 +52,7 @@ def get_grads_torch(P, q, A, l, u, true_x, diff_mode):
         for x in [P.data, q, A.data, l, u, true_x]]
     if cuda:
         P_torch, q_torch, A_torch, l_torch, u_torch, true_x_torch = \
-            [x.cuda() for x in [P.data, q, A.data, l, u, true_x]]
+            [x.cuda() for x in [P_torch, q_torch, A_torch, l_torch, u_torch, true_x_torch]]
 
     for x in [P_torch, q_torch, A_torch, l_torch, u_torch]:
         x.requires_grad = True
